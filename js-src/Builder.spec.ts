@@ -445,6 +445,59 @@ describe("Builder", () => {
       expect(activeManifest?.title).toBe("Test_Manifest");
     });
 
+    it("should sign a pre-computed DataHash (LocalSigner, sync)", async () => {
+      const signer = LocalSigner.newSigner(publicKey, privateKey, "es256");
+
+      // Raw SHA-256 of the source asset bytes. With exclusions=[], the
+      // resulting manifest's c2pa.hash.data.hash equals this digest.
+      const hash = crypto.createHash("sha256").update(source.buffer).digest();
+
+      const manifestBytes = builder.signDataHashedEmbeddable(
+        signer,
+        {
+          name: "raw asset",
+          alg: "sha256",
+          hash,
+          exclusions: [],
+        },
+        "image/jpeg",
+      );
+
+      expect(Buffer.isBuffer(manifestBytes)).toBe(true);
+      expect(manifestBytes.length).toBeGreaterThan(0);
+      // Returned bytes are preformatted for the target format (JPEG APP11
+      // segment). The c2pa JUMBF box label "c2pa" appears inside.
+      expect(manifestBytes.toString("binary")).toContain("c2pa");
+    });
+
+    it("should sign a pre-computed DataHash (CallbackSigner, async)", async () => {
+      const signerConfig: JsCallbackSignerConfig = {
+        alg: "es256",
+        certs: [publicKey],
+        reserveSize: 10000,
+        tsaUrl: undefined,
+        directCoseHandling: false,
+      };
+      const testSigner = new TestSigner(privateKey);
+      const signer = CallbackSigner.newSigner(signerConfig, testSigner.sign);
+
+      const hash = crypto.createHash("sha256").update(source.buffer).digest();
+
+      const manifestBytes = await builder.signDataHashedEmbeddableAsync(
+        signer,
+        {
+          alg: "sha256",
+          hash,
+          exclusions: [],
+        },
+        "image/jpeg",
+      );
+
+      expect(Buffer.isBuffer(manifestBytes)).toBe(true);
+      expect(manifestBytes.length).toBeGreaterThan(0);
+      expect(manifestBytes.toString("binary")).toContain("c2pa");
+    });
+
     it("should preserve JSON assertion characters without escaping", async () => {
       const fingerprintAssertion = JSON.stringify({
         alg: "sha256",

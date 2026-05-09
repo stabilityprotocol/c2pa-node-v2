@@ -18,7 +18,10 @@ use crate::neon_reader::NeonReader;
 use crate::neon_signer::{CallbackSignerConfig, NeonCallbackSigner, NeonLocalSigner};
 use crate::runtime::runtime;
 use crate::utils::parse_settings;
-use c2pa::{assertions::Action, Builder, BuilderIntent, Ingredient};
+use c2pa::{
+    assertions::{Action, DataHash},
+    AsyncSigner, Builder, BuilderIntent, Ingredient, Signer,
+};
 use neon::context::Context as NeonContext;
 use neon::prelude::*;
 use neon_serde4;
@@ -597,6 +600,82 @@ impl NeonBuilder {
                     } else {
                         Ok(result_buffer.upcast::<JsValue>())
                     }
+                }
+                Err(err) => cx.throw_error(err.to_string()),
+            });
+        });
+        Ok(promise)
+    }
+
+    /// Sign a pre-computed `DataHash` with a `LocalSigner`. Produces a
+    /// signed embeddable manifest binary without requiring asset bytes at
+    /// sign-time.
+    ///
+    /// Internally calls `Builder::data_hashed_placeholder` first (required
+    /// by upstream c2pa-rs to reserve the DataHash assertion slot), then
+    /// `Builder::sign_data_hashed_embeddable`. The placeholder bytes are
+    /// discarded — this binding targets sidecar / remote-manifest flows
+    /// where the caller does not need to embed the placeholder.
+    pub fn sign_data_hashed_embeddable(mut cx: FunctionContext) -> JsResult<JsBuffer> {
+        let rt = runtime();
+        let this = cx.this::<JsBox<Self>>()?;
+        let signer = cx.argument::<JsBox<NeonLocalSigner>>(0)?;
+        let data_hash_json = cx.argument::<JsString>(1)?.value(&mut cx);
+        let format = cx.argument::<JsString>(2)?.value(&mut cx);
+
+        let data_hash: DataHash = serde_json::from_str(&data_hash_json)
+            .or_else(|err| cx.throw_error(format!("Invalid DataHash JSON: {err}")))?;
+
+        let mut builder = rt.block_on(async { this.builder.lock().await });
+        let signer = signer.signer();
+        let reserve_size = signer.reserve_size();
+
+        // Required preamble: reserves DataHash slot in the builder definition.
+        builder
+            .data_hashed_placeholder(reserve_size, &format)
+            .or_else(|err| cx.throw_error(err.to_string()))?;
+
+        let bytes = builder
+            .sign_data_hashed_embeddable(&**signer, &data_hash, &format)
+            .or_else(|err| cx.throw_error(err.to_string()))?;
+
+        let buffer = JsBuffer::from_slice(&mut cx, bytes.as_slice())?;
+        Ok(buffer)
+    }
+
+    /// Async variant of `sign_data_hashed_embeddable` for `CallbackSigner`
+    /// (e.g. KMS-backed signing).
+    pub fn sign_data_hashed_embeddable_async(mut cx: FunctionContext) -> JsResult<JsPromise> {
+        let rt = runtime();
+        let channel = cx.channel();
+
+        let this = cx.this::<JsBox<Self>>()?;
+        let signer = cx.argument::<JsBox<NeonCallbackSigner>>(0)?;
+        let signer_ref: &NeonCallbackSigner = signer.deref();
+        let signer = signer_ref.clone();
+        let data_hash_json = cx.argument::<JsString>(1)?.value(&mut cx);
+        let format = cx.argument::<JsString>(2)?.value(&mut cx);
+
+        let data_hash: DataHash = serde_json::from_str(&data_hash_json)
+            .or_else(|err| cx.throw_error(format!("Invalid DataHash JSON: {err}")))?;
+
+        let reserve_size = <NeonCallbackSigner as AsyncSigner>::reserve_size(&signer);
+
+        let builder = Arc::clone(&this.builder);
+        let (deferred, promise) = cx.promise();
+        rt.spawn(async move {
+            let result = async {
+                let mut b = builder.lock().await;
+                b.data_hashed_placeholder(reserve_size, &format)?;
+                b.sign_data_hashed_embeddable_async(&signer, &data_hash, &format)
+                    .await
+            }
+            .await;
+
+            deferred.settle_with(&channel, move |mut cx| match result {
+                Ok(bytes) => {
+                    let buffer = JsBuffer::from_slice(&mut cx, bytes.as_slice())?;
+                    Ok(buffer.upcast::<JsValue>())
                 }
                 Err(err) => cx.throw_error(err.to_string()),
             });

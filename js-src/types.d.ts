@@ -107,6 +107,33 @@ export type SourceAsset = SourceBufferAsset | FileAsset;
 export type DestinationAsset = DestinationBufferAsset | FileAsset;
 
 /**
+ * A pre-computed data hash assertion. Pass to `signDataHashedEmbeddable` to
+ * produce a signed embeddable manifest without needing the asset bytes at
+ * sign time (e.g. for sidecar / remote-manifest workflows).
+ *
+ * For a spec-compliant raw SHA-256 of the whole asset, use:
+ * `{ alg: "sha256", hash: <raw sha256 bytes>, exclusions: [], pad: Buffer.alloc(0) }`
+ *
+ * The shape mirrors the c2pa-rs `DataHash` serde struct. `hash` and `pad`
+ * are serialized as byte arrays (serde_bytes).
+ */
+export interface DataHash {
+  /** Optional friendly name (e.g. `"raw asset"`). */
+  name?: string;
+  /** Hash algorithm. Use `"sha256"` for sidecar / spec-compliant flows. */
+  alg?: "sha256" | "sha384" | "sha512";
+  /** Hash bytes. */
+  hash: Buffer | Uint8Array | number[];
+  /** Padding bytes. May be empty. */
+  pad?: Buffer | Uint8Array | number[];
+  /**
+   * Byte ranges (in the target asset) excluded from the hash. Empty means
+   * the hash covers the entire asset.
+   */
+  exclusions?: { start: number; length: number }[];
+}
+
+/**
  * The return type of resourceToAsset.
  * When the asset is a file, returns the number of bytes written.
  * When the asset is a buffer, returns an object with the buffer and bytes written.
@@ -320,6 +347,45 @@ export interface BuilderInterface {
     filePath: string,
     output: DestinationAsset,
   ): Buffer;
+
+  /**
+   * Produce a signed embeddable manifest from a pre-computed DataHash.
+   *
+   * Unlike `sign`, this does **not** require the asset bytes at sign time —
+   * the caller has already computed the hash externally. The returned
+   * manifest binary can be embedded by the caller, or shipped as a sidecar
+   * / referenced via a remote-manifest URL.
+   *
+   * Typical use: sidecar / remote-manifest signing where only the SHA-256 digest of
+   * the asset is available. With `exclusions: []` and `alg: "sha256"`,
+   * `c2pa.hash.data.hash` in the resulting manifest equals `SHA-256(asset)`,
+   * which a verifier can recompute from the original file.
+   *
+   * @param signer The local signer
+   * @param dataHash The pre-computed data hash
+   * @param format MIME type of the target asset (e.g. `"image/jpeg"`)
+   * @returns The signed `c2pa_manifest` bytes (preformatted for `format`)
+   */
+  signDataHashedEmbeddable(
+    signer: LocalSignerInterface,
+    dataHash: DataHash,
+    format: string,
+  ): Buffer;
+
+  /**
+   * Async variant of `signDataHashedEmbeddable` that uses a CallbackSigner
+   * (e.g. for KMS-backed or otherwise asynchronous signing).
+   *
+   * @param signer The callback signer
+   * @param dataHash The pre-computed data hash
+   * @param format MIME type of the target asset
+   * @returns The signed `c2pa_manifest` bytes
+   */
+  signDataHashedEmbeddableAsync(
+    signer: CallbackSignerInterface,
+    dataHash: DataHash,
+    format: string,
+  ): Promise<Buffer>;
 
   /**
    * Getter for the builder's manifest definition

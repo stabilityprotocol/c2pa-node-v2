@@ -81,6 +81,16 @@ declare module "index.node" {
     input: SourceAsset,
     output: DestinationAsset,
   ): Promise<Buffer | { manifest: Buffer; signedAsset: Buffer }>;
+  export function builderSignDataHashedEmbeddable(
+    signer: NeonLocalSignerHandle,
+    dataHashJson: string,
+    format: string,
+  ): Buffer;
+  export function builderSignDataHashedEmbeddableAsync(
+    signer: NeonCallbackSignerHandle,
+    dataHashJson: string,
+    format: string,
+  ): Promise<Buffer>;
   export function builderManifestDefinition(): string;
   export function builderUpdateManifestProperty(
     property: string,

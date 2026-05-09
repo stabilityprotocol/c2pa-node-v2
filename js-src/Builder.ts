@@ -24,6 +24,7 @@ import type {
   C2paSettings,
   CallbackSignerInterface,
   ClaimVersion,
+  DataHash,
   DestinationAsset,
   FileAsset,
   IdentityAssertionSignerInterface,
@@ -35,6 +36,29 @@ import type {
   NeonBuilderHandle,
 } from "./types.d.ts";
 import { IdentityAssertionSigner } from "./IdentityAssertion.js";
+
+// c2pa-rs `DataHash` uses `#[serde(with = "serde_bytes")]` for `hash` and
+// `pad`, which deserializes from a JSON array of u8 (not a `Buffer` object,
+// whose default JSON shape is `{ type: "Buffer", data: [...] }`). Normalize
+// any byte-like input to `number[]`. `pad` is a required field on the Rust
+// side, so default it to an empty array if the caller omits it.
+function bytesToNumberArray(
+  input: Buffer | Uint8Array | number[] | undefined,
+): number[] {
+  if (input === undefined) return [];
+  if (Array.isArray(input)) return input;
+  return Array.from(input);
+}
+
+function serializeDataHash(dataHash: DataHash): string {
+  return JSON.stringify({
+    name: dataHash.name,
+    alg: dataHash.alg,
+    hash: bytesToNumberArray(dataHash.hash),
+    pad: bytesToNumberArray(dataHash.pad),
+    exclusions: dataHash.exclusions,
+  });
+}
 
 export class Builder implements BuilderInterface {
   constructor(private builder: NeonBuilderHandle) {}
@@ -244,6 +268,32 @@ export class Builder implements BuilderInterface {
       .catch((error: Error) => {
         throw error;
       });
+  }
+
+  signDataHashedEmbeddable(
+    signer: LocalSignerInterface,
+    dataHash: DataHash,
+    format: string,
+  ): Buffer {
+    return getNeonBinary().builderSignDataHashedEmbeddable.call(
+      this.builder,
+      signer.getHandle(),
+      serializeDataHash(dataHash),
+      format,
+    );
+  }
+
+  async signDataHashedEmbeddableAsync(
+    signer: CallbackSignerInterface,
+    dataHash: DataHash,
+    format: string,
+  ): Promise<Buffer> {
+    return getNeonBinary().builderSignDataHashedEmbeddableAsync.call(
+      this.builder,
+      signer.getHandle(),
+      serializeDataHash(dataHash),
+      format,
+    );
   }
 
   getManifestDefinition(): Manifest {
