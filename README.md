@@ -404,6 +404,54 @@ const definition = restoredBuilder.getManifestDefinition();
 console.log(definition.ingredients); // Contains the ingredient
 ```
 
+#### Signing a data-hashed embeddable manifest
+
+When the asset bytes are not available at sign time but you already know the
+asset's hash, use `signDataHashedEmbeddable` (sync) or
+`signDataHashedEmbeddableAsync` (async, callback signer). The Builder produces
+a signed embeddable manifest binary from the supplied `DataHash`, with no
+asset I/O. The caller embeds the result, ships it as a `.c2pa` sidecar, or
+hosts it for remote-manifest fetch.
+
+With `exclusions: []` and `alg: "sha256"`, the resulting `c2pa.hash.data.hash`
+equals `SHA-256(asset)` — a verifier with the original file recomputes the
+same digest and the manifest validates.
+
+```javascript
+import * as crypto from 'node:crypto';
+import { Builder, LocalSigner } from '@contentauth/c2pa-node';
+
+const signer = LocalSigner.newSigner(cert, key, 'es256');
+
+const builder = Builder.withJson(manifestDefinition);
+
+// Pre-computed SHA-256 of the asset (e.g. taken from a manifest, DB row, etc.)
+const hash = crypto.createHash('sha256').update(assetBytes).digest();
+
+const manifestBytes = builder.signDataHashedEmbeddable(
+  signer,
+  { name: 'raw asset', alg: 'sha256', hash, exclusions: [] },
+  'image/jpeg',
+);
+
+// `manifestBytes` is preformatted for the target format (e.g. JPEG APP11
+// segment, MP4 uuid box). Embed it, write a sidecar, or serve as a remote
+// manifest.
+await fs.writeFile('asset.jpg.c2pa', manifestBytes);
+```
+
+The async variant takes a `CallbackSigner` (e.g. KMS-backed):
+
+```javascript
+const manifestBytes = await builder.signDataHashedEmbeddableAsync(
+  callbackSigner,
+  { alg: 'sha256', hash, exclusions: [] },
+  'image/jpeg',
+);
+```
+
+`DataHash` mirrors the c2pa-rs `DataHash` serde struct: `{ name?, alg?, hash, pad?, exclusions? }`. `hash` and `pad` accept `Buffer`, `Uint8Array`, or `number[]`. `exclusions` is `{ start, length }[]`; pass `[]` for whole-asset hashing.
+
 For complete type definitions, see the [@contentauth/c2pa-types](https://www.npmjs.com/package/@contentauth/c2pa-types) package.
 
 ### Signers

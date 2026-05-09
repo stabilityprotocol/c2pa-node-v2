@@ -74,6 +74,14 @@ fn main(mut cx: ModuleContext) -> NeonResult<()> {
         neon_builder::NeonBuilder::identity_sign_async,
     )?;
     cx.export_function(
+        "builderSignDataHashedEmbeddable",
+        neon_builder::NeonBuilder::sign_data_hashed_embeddable,
+    )?;
+    cx.export_function(
+        "builderSignDataHashedEmbeddableAsync",
+        neon_builder::NeonBuilder::sign_data_hashed_embeddable_async,
+    )?;
+    cx.export_function(
         "builderManifestDefinition",
         neon_builder::NeonBuilder::manifest_definition,
     )?;
