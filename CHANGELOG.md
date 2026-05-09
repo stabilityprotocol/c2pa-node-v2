@@ -1,4 +1,4 @@
-# @stabilityprotocol/c2pa-node
+# @joinmonolith/c2pa-node
 
 ## 0.5.5
 

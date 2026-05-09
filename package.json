@@ -1,5 +1,5 @@
 {
-  "name": "@stabilityprotocol/c2pa-node",
+  "name": "@joinmonolith/c2pa-node",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/stabilityprotocol/c2pa-node-v2.git"
