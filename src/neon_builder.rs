@@ -236,6 +236,22 @@ impl NeonBuilder {
                 data.insert(dst.to_owned(), value.clone());
             }
         }
+        // Pass through caller-supplied metadata unchanged; the assertion schema
+        // carries it under the same `metadata` field.
+        if let Some(value) = ingredient.get("metadata") {
+            data.insert("metadata".to_owned(), value.clone());
+        }
+        // dc:format and instanceID are mandatory on a c2pa.ingredient assertion.
+        // Default them when the caller omits the corresponding ingredient fields
+        // so we never emit an assertion that fails to decode.
+        data.entry("dc:format".to_owned()).or_insert_with(|| {
+            serde_json::Value::String("application/octet-stream".to_owned())
+        });
+        data.entry("instanceID".to_owned()).or_insert_with(|| {
+            use rand::Rng as _;
+            let id: u128 = rand::thread_rng().gen();
+            serde_json::Value::String(format!("xmp.iid:{id:032x}"))
+        });
 
         Ok(serde_json::json!({
             "label": "c2pa.ingredient.v3",

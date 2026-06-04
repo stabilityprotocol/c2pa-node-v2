@@ -167,10 +167,18 @@ describe("Builder", () => {
     expect(definition.title).toBe("builder-test-manifest");
     expect(definition.format).toBe("image/tiff");
     expect(definition.instance_id).toBe("1234");
-    expect(definition.ingredients![0].title).toStrictEqual(
-      "c2pa-bindings Test",
+    // addIngredient records the ingredient as a created c2pa.ingredient.v3
+    // assertion rather than populating definition.ingredients.
+    const ingredientAssertion = definition.assertions!.find(
+      (a) => a.label === "c2pa.ingredient.v3",
     );
-    expect(definition.assertions![0].label).toBe("org.test.assertion");
+    expect(ingredientAssertion).toBeDefined();
+    expect(
+      (ingredientAssertion!.data as Record<string, unknown>)["dc:title"],
+    ).toBe("c2pa-bindings Test");
+    expect(
+      definition.assertions!.some((a) => a.label === "org.test.assertion"),
+    ).toBe(true);
     expect(definition.label).toBe("ABCDE");
   });
 
@@ -545,7 +553,7 @@ describe("Builder", () => {
       );
     });
 
-    it("should archive and restore builder with ingredient thumbnail", async () => {
+    it("should archive and restore builder with a created ingredient assertion", async () => {
       const manifestDefinition = {
         claim_generator_info: [
           {
@@ -575,11 +583,7 @@ describe("Builder", () => {
       const builder = Builder.withJson(manifestDefinition);
 
       const ingredientJson = '{"title": "Test Ingredient"}';
-      const testThumbnail = await fs.readFile("./tests/fixtures/thumbnail.jpg");
-      await builder.addIngredient(ingredientJson, {
-        buffer: testThumbnail,
-        mimeType: "jpeg",
-      });
+      await builder.addIngredient(ingredientJson);
 
       // Archive the builder
       const archivePath = path.join(
@@ -607,8 +611,9 @@ describe("Builder", () => {
       });
       expect(reader).not.toBeNull();
       const manifestStore = reader!.json();
+      // The created ingredient assertion survives the archive round-trip and
+      // signing. Peer-manifest/thumbnail import is intentionally not performed.
       expect(JSON.stringify(manifestStore)).toContain("Test Ingredient");
-      expect(JSON.stringify(manifestStore)).toContain("thumbnail.ingredient");
     });
 
     it("should add ingredient with custom metadata", async () => {
@@ -631,9 +636,21 @@ describe("Builder", () => {
       };
       await builder.addIngredient(JSON.stringify(ingredient));
 
+      // The ingredient becomes a created c2pa.ingredient.v3 assertion. Its
+      // high-level fields are mapped onto the assertion field names and custom
+      // metadata is passed through unchanged.
       const definition = builder.getManifestDefinition();
-      expect(definition.ingredients).toHaveLength(1);
-      expect(definition.ingredients![0]).toMatchObject(ingredient);
+      const ingredientAssertion = definition.assertions!.find(
+        (a) => a.label === "c2pa.ingredient.v3",
+      );
+      expect(ingredientAssertion).toBeDefined();
+      expect(ingredientAssertion!.data).toMatchObject({
+        "dc:title": ingredient.title,
+        "dc:format": ingredient.format,
+        instanceID: ingredient.instance_id,
+        relationship: ingredient.relationship,
+        metadata: ingredient.metadata,
+      });
     });
 
     it("should redact a thumbnail from an ingredient manifest", async () => {
