@@ -1,5 +1,11 @@
 # @joinmonolith/c2pa-node
 
+## 0.7.0
+
+### Minor Changes
+
+- 5789e4a: Add support for created ingredient assertions in NeonBuilder
+
 ## 0.6.0
 
 ### Minor Changes
