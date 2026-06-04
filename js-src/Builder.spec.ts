@@ -167,8 +167,10 @@ describe("Builder", () => {
     expect(definition.title).toBe("builder-test-manifest");
     expect(definition.format).toBe("image/tiff");
     expect(definition.instance_id).toBe("1234");
-    // addIngredient records the ingredient as a created c2pa.ingredient.v3
-    // assertion rather than populating definition.ingredients.
+    // addIngredient with a source asset imports the ingredient's manifest chain
+    // (populating definition.ingredients) AND additionally records a created
+    // c2pa.ingredient.v3 assertion in definition.assertions.
+    expect(definition.ingredients![0].title).toStrictEqual("c2pa-bindings Test");
     const ingredientAssertion = definition.assertions!.find(
       (a) => a.label === "c2pa.ingredient.v3",
     );
@@ -553,7 +555,7 @@ describe("Builder", () => {
       );
     });
 
-    it("should archive and restore builder with a created ingredient assertion", async () => {
+    it("should archive and restore builder with ingredient thumbnail", async () => {
       const manifestDefinition = {
         claim_generator_info: [
           {
@@ -583,7 +585,11 @@ describe("Builder", () => {
       const builder = Builder.withJson(manifestDefinition);
 
       const ingredientJson = '{"title": "Test Ingredient"}';
-      await builder.addIngredient(ingredientJson);
+      const testThumbnail = await fs.readFile("./tests/fixtures/thumbnail.jpg");
+      await builder.addIngredient(ingredientJson, {
+        buffer: testThumbnail,
+        mimeType: "jpeg",
+      });
 
       // Archive the builder
       const archivePath = path.join(
@@ -611,9 +617,10 @@ describe("Builder", () => {
       });
       expect(reader).not.toBeNull();
       const manifestStore = reader!.json();
-      // The created ingredient assertion survives the archive round-trip and
-      // signing. Peer-manifest/thumbnail import is intentionally not performed.
+      // The imported ingredient chain (thumbnail) survives the archive round-trip
+      // and signing, alongside the created ingredient assertion.
       expect(JSON.stringify(manifestStore)).toContain("Test Ingredient");
+      expect(JSON.stringify(manifestStore)).toContain("thumbnail.ingredient");
     });
 
     it("should add ingredient with custom metadata", async () => {

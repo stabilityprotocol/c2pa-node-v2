@@ -281,23 +281,62 @@ impl NeonBuilder {
         let rt = runtime();
         let this = cx.this::<JsBox<Self>>()?;
         let ingredient_json = cx.argument::<JsString>(0)?.value(&mut cx);
-        // Argument 1 (the source asset) is intentionally ignored: we record the
-        // ingredient as a created c2pa.ingredient.v3 assertion rather than
-        // importing the peer manifest. See ingredient_created_assertion_def.
-        let def_value = Self::ingredient_created_assertion_def(&ingredient_json)
+        let ingredient = cx
+            .argument::<JsObject>(1)
+            .and_then(|obj| parse_asset(&mut cx, obj))?;
+
+        // This path is given the ingredient's actual bytes, so we do two things:
+        //
+        // 1. Import its manifest store as a peer (`add_ingredient_from_stream_async`)
+        //    so the source's existing C2PA chain is preserved in the output and the
+        //    gathered c2pa.ingredient assertion links to it (`c2pa_manifest`).
+        // 2. Additionally record a self-authored, created c2pa.ingredient.v3
+        //    assertion (same as `add_ingredient`), so the ingredient is always
+        //    represented in created_assertions regardless of import path.
+        //
+        // Net result: the imported, linked ingredient assertion lives in
+        // gathered_assertions, and our created assertion lives in created_assertions.
+        let created_def = Self::ingredient_created_assertion_def(&ingredient_json)
             .or_else(|err| cx.throw_error(err.to_string()))?;
+        let builder = Arc::clone(&this.builder);
 
-        {
-            let mut builder = rt.block_on(async { this.builder.lock().await });
-            let assertion_def = serde_json::from_value(def_value).or_else(|err| {
-                cx.throw_error(format!("Failed to build ingredient assertion: {err}"))
-            })?;
-            builder.definition.assertions.push(assertion_def);
-        }
-
+        let channel = cx.channel();
         let (deferred, promise) = cx.promise();
-        let undefined = cx.undefined();
-        deferred.resolve(&mut cx, undefined);
+
+        rt.spawn(async move {
+            let mut builder = builder.lock().await;
+
+            let result = async {
+                let format = ingredient
+                    .mime_type()
+                    .ok_or_else(|| {
+                        Error::Signing("Ingredient asset must have a mime type".to_string())
+                    })?
+                    .to_owned();
+                let mut ingredient_stream = ingredient.into_read_stream()?;
+                builder
+                    .add_ingredient_from_stream_async(
+                        &ingredient_json,
+                        &format,
+                        &mut ingredient_stream,
+                    )
+                    .await?;
+                // Type is inferred as the crate-private AssertionDefinition from the
+                // push site; it implements Deserialize so we build it from JSON.
+                let assertion_def = serde_json::from_value(created_def).map_err(|err| {
+                    Error::Signing(format!("Failed to build ingredient assertion: {err}"))
+                })?;
+                builder.definition.assertions.push(assertion_def);
+                Ok(())
+            }
+            .await;
+
+            deferred.settle_with(&channel, move |mut cx| match result {
+                Ok(_) => Ok(cx.undefined()),
+                Err(err) => as_js_error(&mut cx, err).and_then(|err| cx.throw(err)),
+            });
+        });
+
         Ok(promise)
     }
 
