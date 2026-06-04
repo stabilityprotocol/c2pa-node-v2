@@ -168,16 +168,18 @@ describe("Builder", () => {
     expect(definition.format).toBe("image/tiff");
     expect(definition.instance_id).toBe("1234");
     // addIngredient with a source asset imports the ingredient's manifest chain
-    // (populating definition.ingredients) AND additionally records a created
-    // c2pa.ingredient.v3 assertion in definition.assertions.
+    // (populating definition.ingredients with the parentOf relationship) AND
+    // additionally records a created c2pa.ingredient.v3 assertion. The created
+    // assertion is forced to componentOf so it does not collide with the imported
+    // parentOf ingredient (a manifest may declare only one parent).
     expect(definition.ingredients![0].title).toStrictEqual("c2pa-bindings Test");
     const ingredientAssertion = definition.assertions!.find(
       (a) => a.label === "c2pa.ingredient.v3",
     );
     expect(ingredientAssertion).toBeDefined();
-    expect(
-      (ingredientAssertion!.data as Record<string, unknown>)["dc:title"],
-    ).toBe("c2pa-bindings Test");
+    const ingredientData = ingredientAssertion!.data as Record<string, unknown>;
+    expect(ingredientData["dc:title"]).toBe("c2pa-bindings Test");
+    expect(ingredientData["relationship"]).toBe("componentOf");
     expect(
       definition.assertions!.some((a) => a.label === "org.test.assertion"),
     ).toBe(true);

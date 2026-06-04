@@ -211,19 +211,28 @@ impl NeonBuilder {
     /// Tradeoff: this records the ingredient relationship only and does not
     /// import a peer manifest from a source asset (no `c2pa_manifest`/
     /// validationResults linkage).
-    fn ingredient_created_assertion_def(ingredient_json: &str) -> Result<serde_json::Value, Error> {
+    fn ingredient_created_assertion_def(
+        ingredient_json: &str,
+        relationship_override: Option<&str>,
+    ) -> Result<serde_json::Value, Error> {
         let ingredient: serde_json::Value = serde_json::from_str(ingredient_json)
             .map_err(|err| Error::Signing(format!("Invalid ingredient JSON: {err}")))?;
 
         let mut data = serde_json::Map::new();
-        // relationship is required on a c2pa.ingredient assertion; default to
-        // componentOf when the caller does not specify one.
+        // relationship is required on a c2pa.ingredient assertion. Callers may
+        // override it (e.g. the asset-import path forces `componentOf` so the
+        // created assertion doesn't collide with the imported `parentOf`
+        // ingredient — only one parent is allowed per manifest). Otherwise use
+        // the caller-supplied relationship, defaulting to componentOf.
         data.insert(
             "relationship".to_owned(),
-            ingredient
-                .get("relationship")
-                .cloned()
-                .unwrap_or_else(|| serde_json::Value::String("componentOf".to_owned())),
+            match relationship_override {
+                Some(rel) => serde_json::Value::String(rel.to_owned()),
+                None => ingredient
+                    .get("relationship")
+                    .cloned()
+                    .unwrap_or_else(|| serde_json::Value::String("componentOf".to_owned())),
+            },
         );
         // Map the high-level Ingredient fields onto the assertion's field names.
         for (src, dst) in [
@@ -265,7 +274,7 @@ impl NeonBuilder {
         let rt = runtime();
         let this = cx.this::<JsBox<Self>>()?;
         let ingredient_json = cx.argument::<JsString>(0)?.value(&mut cx);
-        let def_value = Self::ingredient_created_assertion_def(&ingredient_json)
+        let def_value = Self::ingredient_created_assertion_def(&ingredient_json, None)
             .or_else(|err| cx.throw_error(err.to_string()))?;
 
         let mut builder = rt.block_on(async { this.builder.lock().await });
@@ -295,9 +304,13 @@ impl NeonBuilder {
         //    represented in created_assertions regardless of import path.
         //
         // Net result: the imported, linked ingredient assertion lives in
-        // gathered_assertions, and our created assertion lives in created_assertions.
-        let created_def = Self::ingredient_created_assertion_def(&ingredient_json)
-            .or_else(|err| cx.throw_error(err.to_string()))?;
+        // gathered_assertions (parentOf), and our created assertion lives in
+        // created_assertions. The created one is forced to `componentOf` so it
+        // does not collide with the imported `parentOf` ingredient — a manifest
+        // may declare only one parent (else manifest.multipleParents).
+        let created_def =
+            Self::ingredient_created_assertion_def(&ingredient_json, Some("componentOf"))
+                .or_else(|err| cx.throw_error(err.to_string()))?;
         let builder = Arc::clone(&this.builder);
 
         let channel = cx.channel();
